@@ -1,8 +1,10 @@
 import { normalizeReport } from "@/lib/report/factory";
+import { withReportNumber, type ReportNumberCounter } from "@/lib/report/report-number";
 import { deriveStatus } from "@/lib/report/status";
 import type { WorkReport } from "@/lib/report/types";
 
 import type { ReportRepository } from "./repository";
+import { LocalStorageReportNumberCounter } from "./report-number-counter";
 
 const DB_NAME = "mm-arbeitsberichte";
 const DB_VERSION = 1;
@@ -34,6 +36,8 @@ function promisify<T>(request: IDBRequest<T>): Promise<T> {
 export class IndexedDbReportRepository implements ReportRepository {
   private dbPromise: Promise<IDBDatabase> | null = null;
 
+  constructor(private readonly counter: ReportNumberCounter = new LocalStorageReportNumberCounter()) {}
+
   private db(): Promise<IDBDatabase> {
     this.dbPromise ??= openDb();
     return this.dbPromise;
@@ -56,8 +60,10 @@ export class IndexedDbReportRepository implements ReportRepository {
     return row ? normalizeReport(row) : null;
   }
 
+  /** Speichert; neue Berichte erhalten dabei ihre Berichtsnummer. */
   async save(report: WorkReport): Promise<WorkReport> {
-    const toSave: WorkReport = { ...report, status: deriveStatus(report) };
+    const numbered = report.reportNumber ? report : withReportNumber(report, await this.list(), this.counter);
+    const toSave: WorkReport = { ...numbered, status: deriveStatus(numbered) };
     const store = await this.store("readwrite");
     await promisify(store.put(toSave));
     return toSave;

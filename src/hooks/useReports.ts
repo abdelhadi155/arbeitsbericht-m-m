@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { duplicateReport } from "@/lib/report/factory";
 import type { WorkReport } from "@/lib/report/types";
 import { getReportRepository } from "@/lib/storage";
+import { recoverDraftBackups } from "@/lib/storage/draft-backup";
 
 export function useReports() {
   const [reports, setReports] = useState<WorkReport[] | null>(null);
@@ -22,7 +23,10 @@ export function useReports() {
   }, []);
 
   useEffect(() => {
-    void reload();
+    // Erst verwaiste Notfall-Sicherungen übernehmen, dann laden – so geht kein Entwurf verloren.
+    recoverDraftBackups(getReportRepository())
+      .catch(() => 0)
+      .finally(() => void reload());
   }, [reload]);
 
   const remove = useCallback(

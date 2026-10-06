@@ -50,7 +50,7 @@ export function duplicateReport(source: WorkReport): WorkReport {
   const copy: WorkReport = {
     ...structuredClone(source),
     id: createId(),
-    number: undefined,
+    reportNumber: undefined,
     createdAt: now,
     updatedAt: now,
     workers: source.workers.map((w) => ({ ...w, id: createId(), hours: { ...w.hours } })),
@@ -65,15 +65,19 @@ export function duplicateReport(source: WorkReport): WorkReport {
 /** Ergänzt fehlende Felder älterer gespeicherter Berichte (Schema-Migration light). */
 export function normalizeReport(raw: Partial<WorkReport> & { id: string }): WorkReport {
   const base = createEmptyReport();
+  // Version 1 hieß das Feld „number“.
+  const legacyNumber = (raw as { number?: string }).number;
   const merged: WorkReport = {
     ...base,
     ...raw,
+    reportNumber: raw.reportNumber ?? legacyNumber,
     workers: (raw.workers ?? base.workers).map((w) => ({
       ...createWorker(),
       ...w,
       hours: { ...createWorker().hours, ...w.hours },
     })),
   };
+  delete (merged as { number?: string }).number;
   merged.status = deriveStatus(merged);
   return merged;
 }

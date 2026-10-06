@@ -47,21 +47,31 @@ export function workWeekRange(value: string): { from: string; to: string } | nul
   return { from: toIsoDay(monday), to: toIsoDay(saturday) };
 }
 
-/** 2026-10-06 → 06.10.2026 */
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+/** 2026-10-06 → 06.10.2026 (unabhängig von Browser-Locale, ohne doppelte Punkte) */
 export function formatDateDe(value: string): string {
   const date = parseIsoDay(value);
   if (!date) return "";
-  return date.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
+  return `${pad2(date.getDate())}.${pad2(date.getMonth() + 1)}.${date.getFullYear()}`;
 }
 
+/** Datum → 06.10. (für Spaltenköpfe) */
+export function formatDayMonth(date: Date): string {
+  return `${pad2(date.getDate())}.${pad2(date.getMonth() + 1)}.`;
+}
+
+/** Die sechs Arbeitstage (Mo–Sa) der Woche, in der das Datum liegt. */
+export function workWeekDays(value: string): Date[] {
+  const range = workWeekRange(value);
+  const monday = range ? parseIsoDay(range.from) : null;
+  if (!monday) return [];
+  return Array.from({ length: 6 }, (_, i) => new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i));
+}
+
+/** ISO-Zeitstempel → 06.10.2026, 14:05 */
 export function formatDateTimeDe(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleString("de-DE", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return `${pad2(date.getDate())}.${pad2(date.getMonth() + 1)}.${date.getFullYear()}, ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
 }

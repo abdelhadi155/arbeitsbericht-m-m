@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { Signature } from "@/lib/report/types";
+import { fitContain, hasStrokes, roundStroke } from "@/lib/report/signature";
+import type { Signature, SignatureStroke } from "@/lib/report/types";
 
 import { Button } from "../ui/Button";
 import { TrashIcon } from "../ui/icons";
@@ -14,141 +15,214 @@ interface SignaturePadProps {
   error?: string;
 }
 
-const STROKE = "#111111";
-const EXPORT_MAX_WIDTH = 900;
+const INK = "#111111";
+/** Strichstärke im Koordinatensystem der Unterschrift (CSS-Pixel bei Originalgröße). */
+const LINE_WIDTH = 2.6;
+/** Punkte, die näher als dieser Abstand liegen, werden zusammengefasst (weniger Daten, ruhigere Linie). */
+const MIN_DISTANCE = 0.8;
+/** Vorschaubild in doppelter Auflösung – Vektor-Striche sind für das PDF maßgeblich. */
+const PREVIEW_SCALE = 2;
 
-/** Unterschriftenfeld für Finger, Stift und Maus (Pointer Events). */
+type Space = { width: number; height: number };
+type View = { scale: number; offsetX: number; offsetY: number };
+
+/** Zeichnet Striche mit weichen Kurven (Quadratic-Curve durch die Mittelpunkte). */
+function drawStrokes(ctx: CanvasRenderingContext2D, strokes: SignatureStroke[], view: View) {
+  ctx.strokeStyle = INK;
+  ctx.fillStyle = INK;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.lineWidth = Math.max(1.4, LINE_WIDTH * view.scale);
+  const X = (v: number) => view.offsetX + v * view.scale;
+  const Y = (v: number) => view.offsetY + v * view.scale;
+  for (const s of strokes) {
+    if (s.length < 4) {
+      ctx.beginPath();
+      ctx.arc(X(s[0]), Y(s[1]), ctx.lineWidth / 2, 0, Math.PI * 2);
+      ctx.fill();
+      continue;
+    }
+    ctx.beginPath();
+    ctx.moveTo(X(s[0]), Y(s[1]));
+    for (let i = 2; i + 3 < s.length; i += 2) {
+      const mx = (s[i] + s[i + 2]) / 2;
+      const my = (s[i + 1] + s[i + 3]) / 2;
+      ctx.quadraticCurveTo(X(s[i]), Y(s[i + 1]), X(mx), Y(my));
+    }
+    ctx.lineTo(X(s[s.length - 2]), Y(s[s.length - 1]));
+    ctx.stroke();
+  }
+}
+
+/**
+ * Unterschriftenfeld für Finger, Stift und Maus (Pointer Events).
+ *
+ * Die Unterschrift wird als Vektor-Striche in einem festen Koordinatensystem gespeichert
+ * (Größe des Feldes beim ersten Strich). Dadurch bleibt sie bei Drehung/Größenänderung des
+ * Displays vollständig erhalten, ist auf HiDPI-Displays scharf und wird im PDF als Vektor gezeichnet.
+ */
 export function SignaturePad({ label, value, onChange, error }: SignaturePadProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const drawing = useRef(false);
-  const points = useRef<{ x: number; y: number }[]>([]);
-  const lastExported = useRef<string | null>(null);
+  const strokes = useRef<SignatureStroke[]>([]);
+  const space = useRef<Space | null>(null);
+  const view = useRef<View>({ scale: 1, offsetX: 0, offsetY: 0 });
+  const current = useRef<number[] | null>(null);
+  const activePointer = useRef<number | null>(null);
+  const lastEmitted = useRef<Signature | null>(null);
+  /** Unterschrift aus Version 1 (nur als Bild gespeichert). */
+  const legacyImage = useRef<HTMLImageElement | null>(null);
   const [hasInk, setHasInk] = useState(Boolean(value));
-  const valueRef = useRef(value);
-  useEffect(() => {
-    valueRef.current = value;
-  }, [value]);
 
-  const context = () => canvasRef.current?.getContext("2d") ?? null;
-
-  /** Canvas an Anzeigegröße und Pixeldichte anpassen und vorhandene Unterschrift zeichnen. */
-  const setup = useCallback((sig: Signature | null) => {
+  /** Canvas an Anzeigegröße und Pixeldichte anpassen und alles neu zeichnen. */
+  const render = useCallback(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
     const dpr = Math.max(1, window.devicePixelRatio || 1);
     const { width, height } = canvas.getBoundingClientRect();
-    canvas.width = Math.round(width * dpr);
-    canvas.height = Math.round(height * dpr);
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {
+      canvas.width = Math.round(width * dpr);
+      canvas.height = Math.round(height * dpr);
+    }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, width, height);
-    if (sig) {
-      const img = new Image();
-      img.onload = () => {
-        const scale = Math.min(width / sig.width, height / sig.height);
-        const w = sig.width * scale;
-        const h = sig.height * scale;
-        ctx.drawImage(img, (width - w) / 2, (height - h) / 2, w, h);
-      };
-      img.src = sig.dataUrl;
+    const s = space.current ?? { width, height };
+    const fit = fitContain(s, { x: 0, y: 0, width, height });
+    view.current = { scale: fit.scale, offsetX: fit.offsetX, offsetY: fit.offsetY };
+    if (legacyImage.current?.complete) {
+      ctx.drawImage(legacyImage.current, fit.offsetX, fit.offsetY, s.width * fit.scale, s.height * fit.scale);
     }
+    drawStrokes(ctx, strokes.current, view.current);
   }, []);
 
-  // Neu zeichnen, wenn die Unterschrift von außen kommt (Laden, Löschen) – nicht nach eigenem Export.
+  // Unterschrift von außen übernehmen (Laden, Löschen, anderer Bericht) – nicht das eigene Ergebnis.
   useEffect(() => {
-    if (value?.dataUrl === lastExported.current && value) return;
-    lastExported.current = value?.dataUrl ?? null;
+    if (value === lastEmitted.current) return;
+    lastEmitted.current = value;
+    legacyImage.current = null;
+    if (value) {
+      space.current = { width: value.width, height: value.height };
+      strokes.current = hasStrokes(value) ? value.strokes.map((s) => [...s]) : [];
+      if (!hasStrokes(value) && value.dataUrl) {
+        const img = new Image();
+        img.onload = render;
+        img.src = value.dataUrl;
+        legacyImage.current = img;
+      }
+    } else {
+      space.current = null;
+      strokes.current = [];
+    }
     setHasInk(Boolean(value));
-    setup(value);
-  }, [value, setup]);
+    render();
+  }, [value, render]);
 
+  // Größenänderung (Drehen, Fenster) → aus den Vektoren neu zeichnen, nichts geht verloren.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    let lastWidth = canvas.getBoundingClientRect().width;
-    const observer = new ResizeObserver(() => {
-      const width = canvas.getBoundingClientRect().width;
-      if (Math.abs(width - lastWidth) < 1) return;
-      lastWidth = width;
-      setup(valueRef.current);
-    });
+    const observer = new ResizeObserver(() => render());
     observer.observe(canvas);
-    return () => observer.disconnect();
-  }, [setup]);
+    // Ältere iOS-Versionen ignorieren touch-action teilweise: Scrollen beim Unterschreiben hart unterbinden.
+    const stop = (e: TouchEvent) => e.preventDefault();
+    canvas.addEventListener("touchstart", stop, { passive: false });
+    canvas.addEventListener("touchmove", stop, { passive: false });
+    return () => {
+      observer.disconnect();
+      canvas.removeEventListener("touchstart", stop);
+      canvas.removeEventListener("touchmove", stop);
+    };
+  }, [render]);
 
-  const position = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  const toLogical = (canvas: HTMLCanvasElement, clientX: number, clientY: number) => {
+    const rect = canvas.getBoundingClientRect();
+    const v = view.current;
+    return [(clientX - rect.left - v.offsetX) / v.scale, (clientY - rect.top - v.offsetY) / v.scale] as const;
   };
 
   const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (event.button !== 0 && event.pointerType === "mouse") return;
+    if (activePointer.current !== null) return; // zweiter Finger / Handballen ignorieren
+    if (event.pointerType === "mouse" && event.button !== 0) return;
     event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    drawing.current = true;
-    const p = position(event);
-    points.current = [p];
-    const ctx = context();
-    if (!ctx) return;
-    ctx.fillStyle = STROKE;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 1.3, 0, Math.PI * 2);
-    ctx.fill();
+    const canvas = event.currentTarget;
+    canvas.setPointerCapture(event.pointerId);
+    activePointer.current = event.pointerId;
+    if (!space.current) {
+      const { width, height } = canvas.getBoundingClientRect();
+      space.current = { width: Math.round(width), height: Math.round(height) };
+      render();
+    }
+    const [x, y] = toLogical(canvas, event.clientX, event.clientY);
+    current.current = [x, y];
+    const ctx = canvas.getContext("2d");
+    if (ctx) drawStrokes(ctx, [[x, y]], view.current);
   };
 
   const onPointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!drawing.current) return;
+    if (event.pointerId !== activePointer.current || !current.current) return;
     event.preventDefault();
-    const ctx = context();
-    if (!ctx) return;
-    const events = event.nativeEvent.getCoalescedEvents?.() ?? [event.nativeEvent];
-    const rect = event.currentTarget.getBoundingClientRect();
-    for (const e of events) {
-      const p = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-      const prev = points.current[points.current.length - 1];
-      const pressure = e.pointerType === "pen" && e.pressure > 0 ? e.pressure : 0.5;
-      ctx.strokeStyle = STROKE;
-      ctx.lineWidth = 1.6 + pressure * 2;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      ctx.beginPath();
-      ctx.moveTo(prev.x, prev.y);
-      const mid = { x: (prev.x + p.x) / 2, y: (prev.y + p.y) / 2 };
-      ctx.quadraticCurveTo(prev.x, prev.y, mid.x, mid.y);
-      ctx.lineTo(p.x, p.y);
-      ctx.stroke();
-      points.current.push(p);
+    const canvas = event.currentTarget;
+    const ctx = canvas.getContext("2d");
+    const points = current.current;
+    const events = event.nativeEvent.getCoalescedEvents?.() ?? [];
+    for (const e of events.length ? events : [event.nativeEvent]) {
+      const [x, y] = toLogical(canvas, e.clientX, e.clientY);
+      const px = points[points.length - 2];
+      const py = points[points.length - 1];
+      if (Math.hypot(x - px, y - py) < MIN_DISTANCE) continue;
+      points.push(x, y);
+      // Nur das neue Teilstück zeichnen – flüssig auch bei langsamen Unterschriften.
+      if (ctx) drawStrokes(ctx, [points.slice(-6)], view.current);
     }
   };
 
-  const exportSignature = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const scale = Math.min(1, EXPORT_MAX_WIDTH / canvas.width);
+  const emit = () => {
+    const s = space.current;
+    if (!s) return;
     const out = document.createElement("canvas");
-    out.width = Math.round(canvas.width * scale);
-    out.height = Math.round(canvas.height * scale);
-    out.getContext("2d")?.drawImage(canvas, 0, 0, out.width, out.height);
-    const dataUrl = out.toDataURL("image/png");
-    lastExported.current = dataUrl;
+    out.width = Math.round(s.width * PREVIEW_SCALE);
+    out.height = Math.round(s.height * PREVIEW_SCALE);
+    const ctx = out.getContext("2d");
+    if (ctx) drawStrokes(ctx, strokes.current, { scale: PREVIEW_SCALE, offsetX: 0, offsetY: 0 });
+    const sig: Signature = {
+      dataUrl: out.toDataURL("image/png"),
+      width: s.width,
+      height: s.height,
+      strokes: strokes.current.map((st) => [...st]),
+      signedAt: new Date().toISOString(),
+    };
+    lastEmitted.current = sig;
     setHasInk(true);
-    onChange({ dataUrl, width: out.width, height: out.height, signedAt: new Date().toISOString() });
+    onChange(sig);
   };
 
   const onPointerUp = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!drawing.current) return;
-    drawing.current = false;
+    if (event.pointerId !== activePointer.current) return;
+    activePointer.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
-    exportSignature();
+    const points = current.current;
+    current.current = null;
+    if (!points) return;
+    if (legacyImage.current) {
+      // Alte Bild-Unterschrift lässt sich nicht mit Vektoren mischen → neue Unterschrift beginnen.
+      legacyImage.current = null;
+      strokes.current = [];
+    }
+    strokes.current.push(roundStroke(points));
+    render();
+    emit();
   };
 
   const clear = () => {
-    lastExported.current = null;
+    strokes.current = [];
+    space.current = null;
+    legacyImage.current = null;
+    current.current = null;
+    lastEmitted.current = null;
     setHasInk(false);
-    setup(null);
+    render();
     onChange(null);
   };
 
@@ -156,7 +230,7 @@ export function SignaturePad({ label, value, onChange, error }: SignaturePadProp
     <div>
       <p className="mb-1.5 text-[15px] font-semibold text-ink">{label}</p>
       <div
-        className={`relative overflow-hidden rounded-xl border-2 border-dashed bg-white ${
+        className={`relative overflow-hidden rounded-xl border-2 border-dashed bg-white overscroll-contain ${
           error ? "border-danger" : hasInk ? "border-line" : "border-gold/60"
         }`}
       >
@@ -164,11 +238,12 @@ export function SignaturePad({ label, value, onChange, error }: SignaturePadProp
           ref={canvasRef}
           aria-label={`${label} – mit Finger oder Stift unterschreiben`}
           role="img"
-          className="block h-44 w-full cursor-crosshair touch-none sm:h-48"
+          className="block h-44 w-full cursor-crosshair touch-none select-none sm:h-48"
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
+          onContextMenu={(e) => e.preventDefault()}
         />
         <div className="pointer-events-none absolute inset-x-5 bottom-9 flex items-end gap-2 text-muted/70">
           <span className="text-xl leading-none">×</span>
@@ -182,7 +257,13 @@ export function SignaturePad({ label, value, onChange, error }: SignaturePadProp
       </div>
       <div className="mt-2 flex items-center justify-between gap-2">
         <p className="min-w-0 text-sm text-muted">{hasInk ? "Erfasst" : "Finger oder Stift"}</p>
-        <Button variant="secondary" onClick={clear} disabled={!hasInk} icon={<TrashIcon />} className="shrink-0 whitespace-nowrap text-danger">
+        <Button
+          variant="secondary"
+          onClick={clear}
+          disabled={!hasInk}
+          icon={<TrashIcon />}
+          className="shrink-0 whitespace-nowrap text-danger"
+        >
           Unterschrift löschen
         </Button>
       </div>

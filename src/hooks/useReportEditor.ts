@@ -10,7 +10,10 @@ import { clearDraftBackup, readDraftBackup, writeDraftBackup } from "@/lib/stora
 
 export type SaveState = "idle" | "pending" | "saving" | "saved" | "error";
 
-const AUTOSAVE_DELAY_MS = 700;
+/** Notfall-Sicherung (synchron, localStorage) – kurz entprellt, damit nicht jeder Tastendruck schreibt. */
+const BACKUP_DELAY_MS = 400;
+/** Eigentliches Speichern in IndexedDB. */
+const SAVE_DELAY_MS = 1000;
 
 type Updater = Partial<WorkReport> | ((current: WorkReport) => WorkReport);
 
@@ -18,9 +21,10 @@ type Updater = Partial<WorkReport> | ((current: WorkReport) => WorkReport);
  * Lädt einen Bericht (oder legt einen neuen an) und speichert Änderungen automatisch.
  *
  * Schutz vor Datenverlust:
- * 1. jede Änderung wird sofort synchron in localStorage gesichert,
- * 2. kurz danach (Debounce) in IndexedDB gespeichert,
- * 3. beim Verlassen/Verstecken der Seite wird sofort gespeichert.
+ * 1. Änderungen werden nach kurzer Tipp-Pause synchron in localStorage gesichert,
+ * 2. etwas später in IndexedDB gespeichert,
+ * 3. beim Schließen, Neuladen oder Wechsel in eine andere App wird beides sofort ausgeführt.
+ * Ist die IndexedDB-Fassung älter als die Sicherung, wird beim nächsten Öffnen die Sicherung genommen.
  */
 export function useReportEditor(id: string | null) {
   const [report, setReport] = useState<WorkReport | null>(null);
@@ -30,8 +34,62 @@ export function useReportEditor(id: string | null) {
 
   const latest = useRef<WorkReport | null>(null);
   const dirty = useRef(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const backupDirty = useRef(false);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const backupTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saving = useRef<Promise<void> | null>(null);
+
+  const writeBackupNow = useCallback(() => {
+    if (backupTimer.current) {
+      clearTimeout(backupTimer.current);
+      backupTimer.current = null;
+    }
+    if (backupDirty.current && latest.current) {
+      writeDraftBackup(latest.current);
+      backupDirty.current = false;
+    }
+  }, []);
+
+  const persist = useCallback(async () => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    if (saving.current) await saving.current;
+    const current = latest.current;
+    if (!current || !dirty.current) return;
+    dirty.current = false;
+    setSaveState("saving");
+    const run = (async () => {
+      try {
+        const saved = await getReportRepository().save(current);
+        // Beim ersten Speichern vergibt das Repository die Berichtsnummer.
+        if (latest.current && saved.reportNumber && latest.current.reportNumber !== saved.reportNumber) {
+          latest.current = { ...latest.current, reportNumber: saved.reportNumber };
+          setReport(latest.current);
+          if (latest.current !== current) backupDirty.current = true;
+        }
+        if (!dirty.current && !backupDirty.current) clearDraftBackup(current.id);
+        setIsPersisted(true);
+        setSaveState(dirty.current ? "pending" : "saved");
+      } catch (error) {
+        console.error("Speichern fehlgeschlagen", error);
+        dirty.current = true;
+        backupDirty.current = true;
+        writeBackupNow();
+        setSaveState("error");
+      }
+    })();
+    saving.current = run;
+    await run;
+    saving.current = null;
+  }, [writeBackupNow]);
+
+  /** Sofort sichern und speichern (vor PDF, Navigation, Verlassen der Seite). */
+  const saveNow = useCallback(async () => {
+    writeBackupNow();
+    await persist();
+  }, [persist, writeBackupNow]);
 
   // Laden
   useEffect(() => {
@@ -47,10 +105,11 @@ export function useReportEditor(id: string | null) {
       const stored = await getReportRepository().get(id);
       const backup = readDraftBackup(id);
       let loaded = stored;
+      let recovered = false;
       if (backup && (!stored || backup.updatedAt > stored.updatedAt)) {
         // Letzte Änderung hat es nicht mehr in die Datenbank geschafft → Sicherung verwenden.
-        loaded = normalizeReport(backup);
-        dirty.current = true;
+        loaded = normalizeReport({ ...backup, reportNumber: backup.reportNumber ?? stored?.reportNumber });
+        recovered = true;
       }
       if (cancelled) return;
       if (!loaded) {
@@ -60,40 +119,15 @@ export function useReportEditor(id: string | null) {
       latest.current = loaded;
       setReport(loaded);
       setIsPersisted(Boolean(stored));
-      if (dirty.current) void persist();
+      if (recovered) {
+        dirty.current = true;
+        void persist();
+      }
     })();
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- nur beim Wechsel der ID neu laden
-  }, [id]);
-
-  const persist = useCallback(async () => {
-    if (timer.current) {
-      clearTimeout(timer.current);
-      timer.current = null;
-    }
-    if (saving.current) await saving.current;
-    const current = latest.current;
-    if (!current || !dirty.current) return;
-    dirty.current = false;
-    setSaveState("saving");
-    const run = (async () => {
-      try {
-        await getReportRepository().save(current);
-        if (latest.current === current) clearDraftBackup(current.id);
-        setIsPersisted(true);
-        setSaveState(dirty.current ? "pending" : "saved");
-      } catch (error) {
-        console.error("Speichern fehlgeschlagen", error);
-        dirty.current = true;
-        setSaveState("error");
-      }
-    })();
-    saving.current = run;
-    await run;
-    saving.current = null;
-  }, []);
+  }, [id, persist]);
 
   const update = useCallback(
     (updater: Updater) => {
@@ -104,27 +138,26 @@ export function useReportEditor(id: string | null) {
       next.status = deriveStatus(next);
       latest.current = next;
       dirty.current = true;
+      backupDirty.current = true;
       setReport(next);
       setSaveState("pending");
-      writeDraftBackup(next);
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => void persist(), AUTOSAVE_DELAY_MS);
+      if (backupTimer.current) clearTimeout(backupTimer.current);
+      backupTimer.current = setTimeout(writeBackupNow, BACKUP_DELAY_MS);
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => void persist(), SAVE_DELAY_MS);
     },
-    [persist],
+    [persist, writeBackupNow],
   );
 
-  // Beim Verlassen sofort speichern
+  // Beim Verlassen sofort sichern (ohne „Seite verlassen?“-Dialog)
   useEffect(() => {
     const flush = () => {
-      if (dirty.current && latest.current) {
-        writeDraftBackup(latest.current);
-        void persist();
-      }
+      writeBackupNow();
+      if (dirty.current) void persist();
     };
     const onVisibility = () => {
       if (document.visibilityState === "hidden") flush();
     };
-    // Kein „Seite verlassen?“-Dialog: die synchrone Sicherung in localStorage reicht aus.
     window.addEventListener("pagehide", flush);
     window.addEventListener("beforeunload", flush);
     document.addEventListener("visibilitychange", onVisibility);
@@ -134,7 +167,7 @@ export function useReportEditor(id: string | null) {
       document.removeEventListener("visibilitychange", onVisibility);
       flush();
     };
-  }, [persist]);
+  }, [persist, writeBackupNow]);
 
-  return { report, notFound, saveState, isPersisted, update, saveNow: persist };
+  return { report, notFound, saveState, isPersisted, update, saveNow };
 }

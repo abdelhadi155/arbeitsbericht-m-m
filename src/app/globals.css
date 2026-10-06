@@ -1,14 +1,17 @@
 @import "tailwindcss";
 
-/* Markenfarben aus dem Papierformular (siehe src/config/company-config.ts). */
+/* Farben: identisch mit src/config/brand.ts (wird per Unit-Test geprüft). */
 @theme {
+  --color-black: #000000;
   --color-ink: #262223;
   --color-ink-soft: #4a4547;
   --color-gold: #b8995e;
   --color-gold-dark: #8a6d34;
   --color-gold-light: #f4ede0;
+  --color-white: #ffffff;
   --color-paper: #f6f5f2;
   --color-line: #e3e1dc;
+  --color-rule: #c9c5bf;
   --color-muted: #6e6a66;
   --color-danger: #b42318;
   --color-danger-light: #fdecea;

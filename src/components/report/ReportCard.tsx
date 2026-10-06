@@ -26,7 +26,7 @@ function Action({ label, icon, onClick, href, tone = "default", disabled }: {
   tone?: "default" | "danger" | "primary";
   disabled?: boolean;
 }) {
-  const cls = `flex min-h-14 flex-col items-center justify-center gap-0.5 rounded-xl px-1 text-[12px] font-semibold transition-colors sm:flex-row sm:gap-1.5 sm:text-sm ${
+  const cls = `flex min-h-14 min-w-0 flex-col items-center justify-center gap-0.5 rounded-xl px-0.5 text-[11px] font-semibold tracking-tight min-[360px]:text-[12px] transition-colors sm:flex-row sm:gap-1.5 sm:text-sm ${
     tone === "danger" ? "text-danger hover:bg-danger-light" : tone === "primary" ? "text-ink hover:bg-gold-light" : "text-ink-soft hover:bg-paper"
   } disabled:opacity-50`;
   const content = (
@@ -53,7 +53,17 @@ export function ReportCard({ report, onPdf, onDuplicate, onDelete, pdfBusy }: Pr
     <article className="overflow-hidden rounded-2xl border border-line bg-white shadow-sm" data-testid="report-card">
       <Link href={`/ansicht?id=${report.id}`} className="block p-4 hover:bg-paper/50 sm:p-5">
         <div className="flex items-start justify-between gap-3">
-          <p className="text-sm font-medium text-muted">{reportPeriod(report)}{report.kw ? ` · KW ${report.kw}` : ""}</p>
+          <div className="min-w-0">
+            {report.reportNumber && (
+              <p className="text-[13px] font-bold tracking-wide text-gold-dark" data-testid="card-number">
+                {report.reportNumber}
+              </p>
+            )}
+            <p className="text-sm font-medium text-muted">
+              {reportPeriod(report)}
+              {report.kw ? ` · KW ${report.kw}` : ""}
+            </p>
+          </div>
           <StatusBadge status={report.status} />
         </div>
         <h2 className="mt-1 text-lg font-bold leading-snug">{reportTitle(report)}</h2>

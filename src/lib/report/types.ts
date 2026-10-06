@@ -37,11 +37,20 @@ export interface WorkerEntry {
 
 export type CompletionStatus = "abgeschlossen" | "weitere_arbeiten";
 
+/**
+ * Ein Strich der Unterschrift als flache Liste [x0, y0, x1, y1, …] im Koordinatensystem
+ * width × height der Signatur. Vektordaten skalieren verlustfrei (Displaywechsel, PDF).
+ */
+export type SignatureStroke = number[];
+
 export interface Signature {
-  /** PNG als Data-URL (transparenter Hintergrund). */
+  /** PNG als Data-URL (transparenter Hintergrund) – für Vorschau und als Rückfallebene. */
   dataUrl: string;
+  /** Logische Größe des Unterschriftenfelds, auf die sich die Strich-Koordinaten beziehen. */
   width: number;
   height: number;
+  /** Vektor-Striche (fehlt bei Unterschriften aus Version 1). */
+  strokes?: SignatureStroke[];
   signedAt: string;
 }
 
@@ -49,9 +58,13 @@ export interface Signature {
 export type ReportStatus = "entwurf" | "fertig" | "unterschrieben";
 
 export interface WorkReport {
+  /** Technische, weltweit eindeutige ID (UUID). */
   id: string;
-  /** Laufende Berichtsnummer – wird später zentral vergeben (z. B. „AB-2026-0042“). */
-  number?: string;
+  /**
+   * Fortlaufende Berichtsnummer, z. B. „AB-2026-0001“. Wird beim ersten Speichern vergeben
+   * (heute lokal, später serverseitig) und danach nie mehr geändert.
+   */
+  reportNumber?: string;
   createdAt: string;
   updatedAt: string;
 

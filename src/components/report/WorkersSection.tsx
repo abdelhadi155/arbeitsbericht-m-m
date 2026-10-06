@@ -99,11 +99,11 @@ export function WorkersSection({ report, update, errors, knownNames }: Props) {
                 </label>
               ))}
             </div>
-            <div className="mt-3 flex items-center justify-between gap-2">
-              <Button variant="ghost" onClick={() => fillWeek(worker.id)} className="px-2 text-sm text-gold-dark">
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-x-2">
+              <Button variant="ghost" onClick={() => fillWeek(worker.id)} className="shrink-0 whitespace-nowrap px-2 text-sm text-gold-dark">
                 Mo–Fr je 8 Std.
               </Button>
-              <p className="text-[15px]">
+              <p className="whitespace-nowrap text-[15px]">
                 Summe: <strong className="tabular-nums">{formatHours(workerTotal(worker))} Std.</strong>
               </p>
             </div>

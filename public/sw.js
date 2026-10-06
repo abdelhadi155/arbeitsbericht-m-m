@@ -5,9 +5,19 @@
  * - /api/*: nie cachen
  * Bei Änderungen an dieser Datei CACHE_VERSION erhöhen.
  */
-const CACHE_VERSION = "v1";
+const CACHE_VERSION = "v2";
 const CACHE = `mm-arbeitsbericht-${CACHE_VERSION}`;
-const PRECACHE = ["/", "/bericht", "/ansicht", "/manifest.webmanifest", "/brand/mm-logo.png", "/icons/icon-192.png"];
+const PRECACHE = [
+  "/",
+  "/bericht",
+  "/ansicht",
+  "/manifest.webmanifest",
+  "/brand/mm-logo.png",
+  "/icons/icon-192.png",
+  // für PDFs ohne Netz
+  "/fonts/MMBerichtSans-Regular.ttf",
+  "/fonts/MMBerichtSans-Bold.ttf",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -33,6 +43,7 @@ function isStaticAsset(url) {
     url.pathname.startsWith("/_next/static/") ||
     url.pathname.startsWith("/icons/") ||
     url.pathname.startsWith("/brand/") ||
+    url.pathname.startsWith("/fonts/") ||
     url.pathname === "/icon.png"
   );
 }

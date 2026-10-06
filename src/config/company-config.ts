@@ -1,3 +1,5 @@
+import { brandColors } from "./brand";
+
 /**
  * Firmendaten – zentrale Stelle für alles, was im Formular, in der App und im PDF
  * über die Firma angezeigt wird. Hier ändern, nirgendwo sonst hart codieren.
@@ -80,8 +82,8 @@ export const companyConfig: CompanyConfig = {
     alt: "M&M Heizung & Sanitär Logo",
   },
   brand: {
-    primary: "#262223",
-    accent: "#b8995e",
+    primary: brandColors.ink,
+    accent: brandColors.gold,
   },
 };
 

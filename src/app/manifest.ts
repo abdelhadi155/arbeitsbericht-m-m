@@ -1,5 +1,6 @@
 import type { MetadataRoute } from "next";
 
+import { neutralColors } from "@/config/brand";
 import { companyConfig } from "@/config/company-config";
 
 export default function manifest(): MetadataRoute.Manifest {
@@ -12,7 +13,7 @@ export default function manifest(): MetadataRoute.Manifest {
     scope: "/",
     display: "standalone",
     orientation: "any",
-    background_color: "#f6f5f2",
+    background_color: neutralColors.paper,
     theme_color: companyConfig.brand.primary,
     icons: [
       { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },

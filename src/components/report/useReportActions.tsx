@@ -8,6 +8,7 @@ import { duplicateReport } from "@/lib/report/factory";
 import { reportTitle } from "@/lib/report/summary";
 import type { WorkReport } from "@/lib/report/types";
 import { getReportRepository } from "@/lib/storage";
+import { clearDraftBackup } from "@/lib/storage/draft-backup";
 
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { useToast } from "../ui/Toast";
@@ -41,6 +42,7 @@ export function useReportActions(onChanged?: () => void | Promise<void>) {
   const confirmDelete = async () => {
     if (!toDelete) return;
     await getReportRepository().delete(toDelete.id);
+    clearDraftBackup(toDelete.id); // gelöschte Berichte nicht aus einer Sicherung „wiederbeleben“
     setToDelete(null);
     toast("Bericht gelöscht");
     await onChanged?.();

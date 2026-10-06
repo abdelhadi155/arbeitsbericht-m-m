@@ -31,12 +31,15 @@ export function ReportEditor({ id }: { id: string | null }) {
   const [confirmPdf, setConfirmPdf] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  // Neue Berichte bekommen nach dem ersten Speichern eine feste Adresse (Neuladen öffnet denselben Bericht).
+  // Neue Berichte bekommen mit der ersten Eingabe eine feste Adresse – Neuladen öffnet denselben Bericht
+  // (notfalls aus der lokalen Sicherung, falls das Speichern noch nicht fertig war).
+  const hasChanges = saveState !== "idle" || isPersisted;
+  const reportId = report?.id;
   useEffect(() => {
-    if (!id && isPersisted && report) {
-      window.history.replaceState(window.history.state, "", `/bericht?id=${report.id}`);
+    if (!id && hasChanges && reportId && !window.location.search.includes(reportId)) {
+      window.history.replaceState(window.history.state, "", `/bericht?id=${reportId}`);
     }
-  }, [id, isPersisted, report]);
+  }, [id, hasChanges, reportId]);
 
   const issues = useMemo(() => (report ? validateReport(report) : []), [report]);
   const errors = showErrors ? issuesByField(issues) : {};
@@ -112,10 +115,14 @@ export function ReportEditor({ id }: { id: string | null }) {
         </div>
       </header>
 
-      <main className="mx-auto grid max-w-5xl gap-5 px-3 pt-5 sm:px-6">
+      <main className="mx-auto grid max-w-5xl grid-cols-[minmax(0,1fr)] gap-5 px-3 pt-5 sm:px-6">
         <div>
           <p className="text-sm font-semibold uppercase tracking-[0.15em] text-gold-dark">Arbeitsbericht</p>
           <h1 className="text-2xl font-bold sm:text-3xl">{id ? "Bericht bearbeiten" : "Neuer Arbeitsbericht"}</h1>
+          {/* feste Höhe, einzeilig: Wenn die Nummer vergeben wird, verschiebt sich nichts */}
+          <p className="mt-1 h-6 truncate text-[15px] font-semibold text-gold-dark" data-testid="editor-number">
+            {report.reportNumber ? `Nr. ${report.reportNumber}` : "Nr. folgt beim Speichern"}
+          </p>
           <p className="mt-1 text-[15px] text-muted">
             Felder mit <span className="text-gold-dark">*</span> sind Pflicht. Alles wird automatisch gespeichert.
           </p>
@@ -130,11 +137,11 @@ export function ReportEditor({ id }: { id: string | null }) {
       </main>
 
       <div className="safe-bottom fixed inset-x-0 bottom-0 z-30 border-t border-line bg-white/95 pt-3 backdrop-blur no-print">
-        <div className="mx-auto flex max-w-5xl gap-2 px-3 sm:px-6">
-          <Button variant="secondary" size="lg" onClick={check} icon={<CheckIcon />} className="flex-1 sm:flex-none">
+        <div className="mx-auto grid max-w-5xl grid-cols-[auto_minmax(0,1fr)] gap-2 px-3 sm:px-6">
+          <Button variant="secondary" size="lg" onClick={check} icon={<CheckIcon />} className="whitespace-nowrap px-3 min-[360px]:px-4 sm:px-6">
             Prüfen
           </Button>
-          <Button size="lg" onClick={requestPdf} disabled={busy} icon={<FileDownIcon className="text-lg" />} className="flex-[2] sm:flex-1">
+          <Button size="lg" onClick={requestPdf} disabled={busy} icon={<FileDownIcon className="text-lg" />} className="min-w-0 whitespace-nowrap px-3 min-[360px]:px-4 sm:px-6">
             {busy ? "PDF wird erstellt …" : (
               <>
                 <span className="sm:hidden">PDF erstellen</span>

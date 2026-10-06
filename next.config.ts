@@ -1,12 +1,7 @@
-import { dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
-  // Eigenständiges Projekt im Unterordner – nicht das Lockfile im Repo-Root verwenden.
-  outputFileTracingRoot: dirname(fileURLToPath(import.meta.url)),
   async headers() {
     return [
       {

@@ -1,4 +1,7 @@
+import { normalizeReport } from "@/lib/report/factory";
 import type { WorkReport } from "@/lib/report/types";
+
+import type { ReportRepository } from "./repository";
 
 /**
  * Synchrone Notfall-Sicherung in localStorage.
@@ -32,4 +35,41 @@ export function clearDraftBackup(id: string): void {
   } catch {
     // ignorieren
   }
+}
+
+/** Alle vorhandenen Notfall-Sicherungen. */
+export function listDraftBackups(): WorkReport[] {
+  const result: WorkReport[] = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key?.startsWith(PREFIX)) continue;
+      const report = readDraftBackup(key.slice(PREFIX.length));
+      if (report?.id && report.updatedAt) result.push(report);
+    }
+  } catch {
+    // ohne localStorage gibt es nichts wiederherzustellen
+  }
+  return result;
+}
+
+/**
+ * Übernimmt Sicherungen, die es nicht mehr in die Datenbank geschafft haben
+ * (z. B. App direkt nach dem Tippen geschlossen). Gibt die Anzahl geretteter Berichte zurück.
+ */
+export async function recoverDraftBackups(repository: ReportRepository): Promise<number> {
+  let recovered = 0;
+  for (const backup of listDraftBackups()) {
+    try {
+      const stored = await repository.get(backup.id);
+      if (!stored || backup.updatedAt > stored.updatedAt) {
+        await repository.save(normalizeReport({ ...backup, reportNumber: backup.reportNumber ?? stored?.reportNumber }));
+        recovered++;
+      }
+      clearDraftBackup(backup.id);
+    } catch (error) {
+      console.warn("Sicherung konnte nicht wiederhergestellt werden", error);
+    }
+  }
+  return recovered;
 }

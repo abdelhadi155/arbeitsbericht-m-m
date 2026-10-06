@@ -78,14 +78,23 @@ export function ReportView({ id }: { id: string | null }) {
       </header>
 
       <main className="mx-auto max-w-4xl px-3 pt-5 sm:px-6">
-        <article className="rounded-2xl border border-line bg-white p-5 shadow-sm sm:p-10">
-          <div className="flex items-start justify-between gap-4 border-b-2 border-gold pb-5">
-            <div>
-              <p className="text-[12px] font-bold uppercase tracking-[0.18em] text-gold-dark">{c.name}</p>
-              <h1 className="mt-1 text-3xl font-bold">Arbeitsbericht</h1>
+        <article className="rounded-2xl border border-line bg-white p-4 shadow-sm min-[360px]:p-5 sm:p-10">
+          <div className="flex items-start justify-between gap-3 border-b-2 border-gold pb-5 sm:gap-4">
+            <div className="min-w-0">
+              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-gold-dark sm:text-[12px] sm:tracking-[0.18em]">
+                {c.name}
+              </p>
+              <h1 className="mt-1 text-2xl font-bold sm:text-3xl">
+                Arbeitsbericht
+                {report.reportNumber && (
+                  <span className="block text-lg text-gold-dark sm:ml-2 sm:inline sm:text-xl" data-testid="view-number">
+                    Nr. {report.reportNumber}
+                  </span>
+                )}
+              </h1>
               <p className="mt-1 text-sm text-muted">{reportPeriod(report)}</p>
             </div>
-            <BrandLogo size={84} />
+            <BrandLogo size={84} className="size-14 sm:size-[84px]" />
           </div>
 
           <div className="mt-6 grid gap-4 sm:grid-cols-4">
@@ -123,7 +132,7 @@ export function ReportView({ id }: { id: string | null }) {
                 <tr className="border-t-2 border-gold font-bold">
                   <td className="p-2">Gesamtstunden</td>
                   {WEEKDAYS.map((d) => (
-                    <td key={d} className="p-2 text-center tabular-nums">{formatHours(dayTotal(report.workers, d))}</td>
+                    <td key={d} className="p-2 text-center tabular-nums">{dayTotal(report.workers, d) ? formatHours(dayTotal(report.workers, d)) : "–"}</td>
                   ))}
                   <td className="p-2 text-right tabular-nums" data-testid="view-total">{formatHours(reportTotal(report))} Std.</td>
                 </tr>
@@ -183,17 +192,23 @@ export function ReportView({ id }: { id: string | null }) {
       </main>
 
       <div className="safe-bottom fixed inset-x-0 bottom-0 z-30 border-t border-line bg-white/95 pt-3 backdrop-blur no-print">
-        <div className="mx-auto grid max-w-4xl grid-cols-[1fr_1fr_auto_auto] gap-2 px-3 sm:px-6">
-          <LinkButton href={`/bericht?id=${report.id}`} variant="secondary" size="lg" icon={<PencilIcon />}>
+        <div className="mx-auto grid max-w-4xl grid-cols-[minmax(0,1fr)_minmax(0,1fr)_3.5rem_3.5rem] gap-2 px-3 sm:px-6">
+          <LinkButton href={`/bericht?id=${report.id}`} variant="secondary" size="lg" icon={<PencilIcon />} className="min-w-0 px-3">
             Bearbeiten
           </LinkButton>
-          <Button size="lg" icon={<FileDownIcon />} onClick={() => actions.createPdf(report)} disabled={actions.pdfBusyId === report.id}>
+          <Button
+            size="lg"
+            icon={<FileDownIcon />}
+            onClick={() => actions.createPdf(report)}
+            disabled={actions.pdfBusyId === report.id}
+            className="min-w-0 px-3"
+          >
             PDF
           </Button>
-          <Button variant="secondary" size="lg" aria-label="Duplizieren" onClick={() => actions.duplicate(report)} className="px-4">
+          <Button variant="secondary" size="lg" aria-label="Duplizieren" onClick={() => actions.duplicate(report)} className="px-0">
             <CopyIcon className="text-lg" />
           </Button>
-          <Button variant="secondary" size="lg" aria-label="Löschen" onClick={() => actions.requestDelete(report)} className="px-4 text-danger">
+          <Button variant="secondary" size="lg" aria-label="Löschen" onClick={() => actions.requestDelete(report)} className="px-0 text-danger">
             <TrashIcon className="text-lg" />
           </Button>
         </div>
